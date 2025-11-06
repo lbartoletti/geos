@@ -205,6 +205,10 @@ OffsetCurve::computeSections(const LineString& lineGeom, double dist)
         auto hole = bufferPoly->getInteriorRingN(i)->getCoordinatesRO();
         computeCurveSections(hole, *rawCurve, sections);
     }
+
+    //-- fill gaps between sections with raw curve segments
+    fillGaps(sections, *rawCurve);
+
     return sections;
 }
 
@@ -284,6 +288,95 @@ OffsetCurve::computeCurveSections(
 
     extractSections(bufferRingPts, rawPosition, bufferFirstIndex, sections);
 }
+
+/* private */
+void
+ OffsetCurve::fillGaps(
+    std::vector<std::unique_ptr<OffsetCurveSection>>& sections,
+    const CoordinateSequence& rawCurve)
+{
+    if (sections.size() < 2 || rawCurve.size() < 2) {
+        return;
+    }
+
+    //-- sort sections in order along the raw offset curve
+    std::sort(sections.begin(), sections.end(), OffsetCurveSection::OffsetCurveSectionComparator);
+
+    //-- detect and fill gaps between consecutive sections by comparing coordinates
+    std::vector<std::unique_ptr<OffsetCurveSection>> gapSections;
+
+    for (std::size_t i = 0; i < sections.size() - 1; i++) {
+        const CoordinateSequence* coords1 = sections[i]->getCoordinates();
+        const CoordinateSequence* coords2 = sections[i+1]->getCoordinates();
+
+        if (coords1->size() == 0 || coords2->size() == 0) continue;
+
+        //-- get end coordinate of current section and start of next
+        const Coordinate& endCoord = coords1->getAt(coords1->size() - 1);
+        const Coordinate& nextStartCoord = coords2->getAt(0);
+
+        //-- check if there's a spatial gap
+        double dist = endCoord.distance(nextStartCoord);
+
+        //-- Only fill gaps that result from buffer holes due to close segment approaches
+        //-- When input segments are closer than 2*offset, the buffer has a hole,
+        //-- and the raw curve passes through the interior (not on any ring boundary)
+        //-- Use 2*distance as upper threshold - larger gaps are from intentional self-intersections
+        //-- Lower threshold: use a small epsilon to avoid filling already-touching sections (dist=0)
+        static constexpr double MIN_GAP_DISTANCE = 1e-10;
+        if (dist > MIN_GAP_DISTANCE && dist < std::abs(distance) * 2.0) {
+            //-- find locations by projecting onto raw curve segments
+            double endLoc = -1.0;
+            double nextStartLoc = -1.0;
+            double endDistMin = std::numeric_limits<double>::max();
+            double startDistMin = std::numeric_limits<double>::max();
+
+            for (std::size_t j = 0; j < rawCurve.size() - 1; j++) {
+                LineSegment seg(rawCurve.getAt(j), rawCurve.getAt(j+1));
+
+                //-- check distance to endCoord
+                double distToEnd = seg.distance(endCoord);
+                if (distToEnd < endDistMin) {
+                    endDistMin = distToEnd;
+                    double frac = seg.segmentFraction(endCoord);
+                    endLoc = static_cast<double>(j) + frac;
+                }
+
+                //-- check distance to nextStartCoord
+                double distToStart = seg.distance(nextStartCoord);
+                if (distToStart < startDistMin) {
+                    startDistMin = distToStart;
+                    double frac = seg.segmentFraction(nextStartCoord);
+                    nextStartLoc = static_cast<double>(j) + frac;
+                }
+            }
+
+            //-- if we found both positions and there's a gap, fill it
+            //-- Also check that the coordinates are actually close to the raw curve
+            //-- (not just their projections) to avoid filling intentional gaps
+            //-- Use 10% of offset as projection tolerance
+            static constexpr double MAX_PROJECTION_DISTANCE_FACTOR = 0.1;
+            double maxProjectionDist = std::abs(distance) * MAX_PROJECTION_DISTANCE_FACTOR;
+
+            if (endLoc >= 0 && nextStartLoc >= 0 && nextStartLoc > endLoc + 0.01
+                && endDistMin < maxProjectionDist && startDistMin < maxProjectionDist) {
+                auto gapSection = OffsetCurveSection::createFromRawCurve(rawCurve, endLoc, nextStartLoc);
+                gapSections.emplace_back(std::move(gapSection));
+            }
+        }
+    }
+
+    //-- insert gap sections into the main sections vector
+    if (!gapSections.empty()) {
+        sections.reserve(sections.size() + gapSections.size());
+        for (auto& gapSection : gapSections) {
+            sections.emplace_back(std::move(gapSection));
+        }
+        //-- re-sort after adding gap sections
+        std::sort(sections.begin(), sections.end(), OffsetCurveSection::OffsetCurveSectionComparator);
+    }
+}
+
 
 
 /* private */

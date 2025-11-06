@@ -161,6 +161,59 @@ OffsetCurveSection::create(
     return ocs;
 }
 
+/* public static */
+std::unique_ptr<OffsetCurveSection>
+ OffsetCurveSection::createFromRawCurve(
+    const CoordinateSequence& rawCurve,
+    double startLoc, double endLoc)
+{
+    std::unique_ptr<CoordinateSequence> secPts(new CoordinateSequence());
+
+    // Extract integer and fractional parts of locations
+    std::size_t startSegIndex = static_cast<std::size_t>(std::floor(startLoc));
+    std::size_t endSegIndex = static_cast<std::size_t>(std::floor(endLoc));
+    double startFrac = startLoc - std::floor(startLoc);
+    double endFrac = endLoc - std::floor(endLoc);
+
+    // Add start point (interpolated if needed)
+    if (startFrac > 0.0 && startSegIndex < rawCurve.size() - 1) {
+        const Coordinate& p0 = rawCurve.getAt(startSegIndex);
+        const Coordinate& p1 = rawCurve.getAt(startSegIndex + 1);
+        Coordinate startPt(
+            p0.x + startFrac * (p1.x - p0.x),
+            p0.y + startFrac * (p1.y - p0.y)
+        );
+        secPts->add(startPt);
+    } else if (startSegIndex < rawCurve.size()) {
+        secPts->add(rawCurve.getAt(startSegIndex));
+    }
+
+    // Add intermediate points
+    // Only add if we're spanning multiple segments
+    if (endSegIndex > startSegIndex) {
+        for (std::size_t i = startSegIndex + 1; i <= endSegIndex && i < rawCurve.size(); i++) {
+            secPts->add(rawCurve.getAt(i));
+        }
+    }
+
+    // Add end point (interpolated if needed)
+    if (endFrac > 0.0 && endSegIndex < rawCurve.size() - 1) {
+        const Coordinate& p0 = rawCurve.getAt(endSegIndex);
+        const Coordinate& p1 = rawCurve.getAt(endSegIndex + 1);
+        Coordinate endPt(
+            p0.x + endFrac * (p1.x - p0.x),
+            p0.y + endFrac * (p1.y - p0.y)
+        );
+        // Only add if it's not already added (avoid duplicate with intermediate points)
+        if (secPts->size() == 1 || !endPt.equals2D(secPts->getAt(secPts->size() - 1))) {
+            secPts->add(endPt);
+        }
+    }
+
+    std::unique_ptr<OffsetCurveSection> ocs(new OffsetCurveSection(std::move(secPts), startLoc, endLoc));
+    return ocs;
+}
+
 
 
 } // namespace geos.operation.buffer

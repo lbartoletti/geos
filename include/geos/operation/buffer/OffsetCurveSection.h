@@ -74,6 +74,7 @@ public:
     std::unique_ptr<CoordinateSequence> releaseCoordinates();
 
     double getLocation() const { return location; };
+    double getLastLocation() const { return locLast; };
 
     /**
     * Joins section coordinates into a LineString.
@@ -96,6 +97,19 @@ public:
         const CoordinateSequence* srcPts,
         std::size_t start, std::size_t end,
         double loc, double locLast);
+
+    /**
+    * Creates an offset curve section from a portion of the raw offset curve.
+    * This is used to fill gaps between sections extracted from the buffer ring.
+    *
+    * @param rawCurve the raw offset curve
+    * @param startLoc the start location along the raw curve
+    * @param endLoc the end location along the raw curve
+    * @return the offset curve section
+    */
+    static std::unique_ptr<OffsetCurveSection> createFromRawCurve(
+        const CoordinateSequence& rawCurve,
+        double startLoc, double endLoc);
 
     static bool OffsetCurveSectionComparator(
         const std::unique_ptr<OffsetCurveSection>& a,

@@ -133,6 +133,18 @@ private:
         std::vector<std::unique_ptr<OffsetCurveSection>>& sections);
 
     /**
+    * Fills gaps in the offset curve sections by inserting raw curve segments.
+    * Gaps occur when the buffer polygon has holes and parts of the raw curve
+    * lie in the interior of the buffer, not on any ring boundary.
+    *
+    * @param sections the list of sections (will be modified in place)
+    * @param rawCurve the raw offset curve
+    */
+    void fillGaps(
+        std::vector<std::unique_ptr<OffsetCurveSection>>& sections,
+        const CoordinateSequence& rawCurve);
+
+    /**
     * Matches the segments in a buffer ring to the raw offset curve
     * to obtain their match positions (if any).
     *
